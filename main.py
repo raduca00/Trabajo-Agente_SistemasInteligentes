@@ -1,10 +1,61 @@
+import json
+import os
 from datetime import datetime, timedelta
 
 class SmartStudyAgent:
-    def __init__(self):
-        # Component 4: Volatile working memory (list in RAM execution)
+    def __init__(self, memory_file="tasks_memory.json"):
+        # Component 4: Persistent working memory (RAM + JSON file on disk)
+        self.memory_file = memory_file
         self.tasks = []
-        print("🤖 SmartStudy Agent: Volatile environment successfully initialized.")
+        self.load_tasks()
+        print(f"🤖 SmartStudy Agent: Environment initialized. Loaded {len(self.tasks)} task(s) from persistent memory. 🤖")
+
+    # --- PERSISTENT MEMORY METHODS (LEVEL 2) ---
+    def load_tasks(self):
+        """Loads tasks from the local JSON file and recalculates remaining days dynamically."""
+        if not os.path.exists(self.memory_file):
+            self.tasks = []
+            return
+
+        try:
+            with open(self.memory_file, "r", encoding="utf-8") as file:
+                data = json.load(file)
+                now = datetime.now()
+                
+                for task in data:
+                    if isinstance(task.get("deadline_date"), str):
+                        deadline = datetime.fromisoformat(task["deadline_date"])
+                        task["deadline_date"] = deadline
+                        
+                        # Recalculate days left comparing deadline against current clock
+                        remaining_days = (deadline - now).days
+                        # Prevent negative days if the deadline already passed (sets to 0 = due today/overdue)
+                        task["days_to_deadline"] = max(0, remaining_days)
+                        
+                self.tasks = data
+                # Save the updated days back to the JSON file
+                self.save_tasks()
+                
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"⚠️ Warning: Could not read memory file ({e}). Starting with empty memory.")
+            self.tasks = []
+
+
+    def save_tasks(self):
+        """Saves current RAM tasks into the local JSON file."""
+        serializable_tasks = []
+        for task in self.tasks:
+            task_copy = task.copy()
+            # Convert Python datetime objects to ISO strings so JSON can store them
+            if isinstance(task_copy.get("deadline_date"), datetime):
+                task_copy["deadline_date"] = task_copy["deadline_date"].isoformat()
+            serializable_tasks.append(task_copy)
+
+        try:
+            with open(self.memory_file, "w", encoding="utf-8") as file:
+                json.dump(serializable_tasks, file, indent=4, ensure_ascii=False)
+        except IOError as e:
+            print(f"❌ Error saving to persistent memory: {e}")
 
     # Component 1: Task Analyzer & Manual Input Interface (With Expected Schemas)
     def menu_input_tasks(self):
@@ -38,8 +89,8 @@ class SmartStudyAgent:
 
             # 3. Schema Guidance for Estimated Workload Hours
             while True:
-                print(f"💡 Expected Schema: <float>Hours     |  Example: 4 or 6.5 (hours of total study required)")
-                hours_input = input(f"⏳ Estimated hours required for '{name}': ").strip()
+                print(f"Expected Schema: <float>Hours     |  Example: 4 or 6.5 (hours of total study required)")
+                hours_input = input(f"Estimated hours required for '{name}': ").strip()
                 if hours_input.lower() == 'exit': return
                 try:
                     estimated_hours = float(hours_input)
@@ -60,15 +111,16 @@ class SmartStudyAgent:
                 "priority": 0.0
             }
             
-            # Appends tasks sequentially to maintain previous data state in memory (RAM)
+            # Appends tasks sequentially and syncs with JSON persistent memory
             self.tasks.append(task)
-            print(f"✅ State updated! Total tasks registered in volatile memory: {len(self.tasks)}")
+            self.save_tasks()
+            print(f"State updated & saved to disk! Total tasks in memory: {len(self.tasks)}")
 
     # Component 2: Prioritizer (Rule-Based Reasoning Engine)
     def calculate_priorities(self):
         if not self.tasks:
             return
-        print("\n🧠 Thinking... Evaluating task priorities...")
+        print("\nThinking... Evaluating task priorities...")
         for task in self.tasks:
             # Agentic rule: Less time remaining combined with higher workload increases urgency.
             # Avoid division by zero if the deadline is today (0 days remaining)
@@ -77,15 +129,17 @@ class SmartStudyAgent:
         
         # Sort tasks dynamically from highest to lowest urgency
         self.tasks.sort(key=lambda x: x["priority"], reverse=True)
+        # Update JSON order so priorities stay persisted
+        self.save_tasks()
 
     # Component 3: Scheduler (Decision-Making System)
     def generate_schedule(self):
         if not self.tasks:
-            print("\n ⚠️ No tasks found in the agent's memory. Please add some tasks first!")
+            print("\nNo tasks found in the agent's memory. Please add some tasks first!")
             return
 
         while True:
-            print("💡 Expected Schema: <float>DailyHours |  Example: 2 or 3.5 (hours per day)")
+            print("Expected Schema: <float>DailyHours |  Example: 2 or 3.5 (hours per day)")
             hours_input = input("📅 How many hours do you have available per day to study?: ").strip()
             try:
                 available_hours_per_day = float(hours_input)
@@ -129,15 +183,17 @@ class SmartStudyAgent:
     # Memory Management Helper Functions
     def list_tasks(self):
         if not self.tasks:
-            print("\n📭 Task memory is currently empty.")
+            print("\nTask memory is currently empty.")
             return
-        print("\n📋 --- Current Tasks in Volatile Memory ---")
+        print("\n--- Current Tasks in Persistent Memory ---")
         for i, t in enumerate(self.tasks, 1):
             print(f"  {i}. {t['name']} | Due in: {t['days_to_deadline']} days | Required workload: {t['estimated_hours']}h")
 
     def clear_tasks(self):
+        """Wipes both RAM execution memory and the persistent JSON file."""
         self.tasks = []
-        print("\n 🗑️ Volatile memory cleared successfully. All tasks have been wiped from execution.")
+        self.save_tasks()
+        print("\nMemory wiped successfully (RAM and JSON disk file cleared).")
 
 # --- MAIN INTERACTIVE INTERFACE LOOP (CLI) ---
 def start_interface():
@@ -145,12 +201,12 @@ def start_interface():
     
     while True:
         print("\n========================================")
-        print("🤖 SMARTSTUDY AGENT MAIN MENU")
+        print("SMARTSTUDY AGENT MAIN MENU")
         print("========================================")
         print("1. 📥 Input tasks manually (with Schema Guide)")
         print("2. 📋 View current tasks in memory")
         print("3. 📅 Generate study schedule")
-        print("4. 🗑️ Clear task memory")
+        print("4. 🗑️ Clear task memory (RAM + JSON)")
         print("5. ❌ Exit program")
         print("========================================")
         
@@ -160,15 +216,18 @@ def start_interface():
             agent.menu_input_tasks()
         elif choice == "2":
             agent.list_tasks()
+            input("\n Press Enter to return to the menu...")
         elif choice == "3":
             agent.generate_schedule()
+            input("\n Press Enter to return to the menu...")
         elif choice == "4":
             agent.clear_tasks()
+            input("\n Press Enter to return to the menu...")
         elif choice == "5":
-            print("\n👋 Goodbye! Freeing agent workspace... Shutting down.")
+            print("\n Goodbye! Persistent memory is safely stored on disk. Shutting down.")
             break
         else:
-            print("\n ⚠️ Invalid option. Please enter a number between 1 and 5.")
+            print("\n Invalid option. Please enter a number between 1 and 5.")
 
 if __name__ == "__main__":
     start_interface()
