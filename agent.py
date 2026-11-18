@@ -17,6 +17,13 @@ class SmartStudyAgent:
             self.memory.save_tasks(self.tasks)
             print(f"State updated & saved to disk! Total tasks in memory: {len(self.tasks)}")
 
+    def add_llm_tasks(self):
+        new_tasks = self.input_provider.get_tasks_from_llm()
+        if new_tasks:
+            self.tasks.extend(new_tasks)
+            self.memory.save_tasks(self.tasks)
+            print(f"💾 State updated & saved to disk! Total tasks in memory: {len(self.tasks)}")
+
     def view_tasks(self):
         if not self.tasks:
             print("\nTask memory is currently empty.")
